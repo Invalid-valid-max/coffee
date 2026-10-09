@@ -1,0 +1,55 @@
+import { chromium } from 'playwright';
+import assert from 'node:assert/strict';
+const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || '/usr/bin/chromium', headless: true, args: ['--no-sandbox'] });
+try {
+  const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, reducedMotion: 'reduce' });
+  const errors = [];
+  page.on('pageerror', e => errors.push(e.message));
+  page.on('response', r => { if (r.status() >= 400) errors.push(`${r.status()} ${r.url()}`); });
+  await page.goto('http://127.0.0.1:5173', { waitUntil: 'networkidle' });
+  await page.evaluate(() => document.fonts.ready);
+  assert.equal(await page.locator('h1').textContent(), 'A little more in every cup.');
+  assert.equal(await page.locator('.fact-card').count(), 6);
+  await page.screenshot({ path: '/tmp/coffee-desktop.png' });
+  await page.getByRole('button', { name: 'The bean', exact: true }).click();
+  assert.equal(await page.locator('.fact-card').count(), 2);
+  await page.getByRole('button', { name: 'Save: Your coffee started as a cherry.', exact: true }).click();
+  await page.reload({ waitUntil: 'networkidle' });
+  await page.getByRole('button', { name: '♡ Saved (1)', exact: true }).click();
+  assert.equal(await page.locator('.fact-card').count(), 1);
+  await page.getByRole('button', { name: 'A little more on this' }).click();
+  const modal = page.getByRole('dialog');
+  await modal.waitFor({ state: 'visible' });
+  assert.equal(await modal.locator('h2').textContent(), 'Your coffee started as a cherry.');
+  assert.match(await modal.locator('.source-link').getAttribute('href'), /^https:/);
+  await page.keyboard.press('Escape');
+  await modal.waitFor({ state: 'hidden' });
+  await page.getByRole('button', { name: 'Unsave: Your coffee started as a cherry.', exact: true }).click();
+  assert.equal(await page.locator('.empty-state').count(), 1);
+  await page.getByRole('button', { name: 'Explore all notes' }).click();
+  assert.equal(await page.locator('.fact-card').count(), 6);
+  await page.getByRole('button', { name: 'Surprise me' }).click();
+  const first = await modal.locator('h2').textContent();
+  await modal.getByRole('button', { name: 'Another discovery' }).click();
+  assert.notEqual(await modal.locator('h2').textContent(), first);
+  await modal.getByRole('button', { name: 'Close coffee note' }).click();
+  await page.locator('.chapter summary').first().click();
+  assert.equal(await page.locator('.chapter').first().getAttribute('open'), '');
+  await page.locator('.faq-list summary').first().click();
+  assert.equal(await page.locator('.faq-list details').first().getAttribute('open'), '');
+  for (const width of [1440, 768, 390, 320]) {
+    await page.setViewportSize({ width, height: 844 });
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, `No horizontal overflow at ${width}px`);
+  }
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.screenshot({ path: '/tmp/coffee-mobile.png' });
+  await page.getByRole('button', { name: 'Menu +' }).click();
+  await page.getByRole('navigation').getByRole('link', { name: 'Coffee notes', exact: true }).click();
+  assert.equal(await page.getByRole('button', { name: 'Menu +' }).getAttribute('aria-expanded'), 'false');
+  await page.screenshot({ path: '/tmp/coffee-mobile-notes.png' });
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.screenshot({ path: '/tmp/coffee-full.png', fullPage: true });
+  assert.deepEqual(errors, [], 'No browser errors or failed HTTP responses');
+  console.log('PASS: render, topic filters, saved-note persistence, empty state, modal/source/Escape, random discovery, accordions, mobile navigation, and overflow at 4 viewport widths.');
+} finally { await browser.close(); }
